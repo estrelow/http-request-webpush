@@ -1,5 +1,5 @@
 #!/usr/bin/perl
-use strict;
+use strict 'vars';
 use warnings;
 
 use CGI;
@@ -9,10 +9,10 @@ use HTTP::Request;
 use LWP::UserAgent;
 use Crypt::JWT qw(encode_jwt);
 use MIME::Base64 qw( decode_base64 encode_base64 encode_base64url);
-use Crypt::ECDH_ES ':all';
 use Crypt::KeyDerivation ':all';
 use Crypt::PRNG qw(random_bytes);
 use Crypt::AuthEnc::GCM;
+use Crypt::PK::ECC 'ecc_shared_secret';
 
 my $req=new CGI;
 
@@ -139,6 +139,7 @@ sub postpush($$$) {
    my $link=shift();
 
    my $conf=Config::IniFiles->new(-file => "push.conf", -nocase => 1);
+   die "Falla config" unless($conf);
    my $json=$conf->val($session,'data');
    my $keys=from_json($json);
 
@@ -158,23 +159,35 @@ EOJ
    my $public=decode_base64($server_key->{public});
    my $secret={ kty => 'EC',
       crv => 'P-256',
-      x => encode_base64(substr($public,0,32)),
-      y => encode_base64(substr($public,33,64)),
+      x => encode_base64url(substr($public,0,32)),
+      y => encode_base64url(substr($public,33,64)),
       d => $server_key->{private}
    };
    my $token = encode_jwt(payload => $data, key => $secret  , alg=>'ES256');
    $send->header( 'Authorization' => "WebPush $token" );
    $send->header('Crypto-Key' => $server_key->{public});
 
-   my ($pub_signkey, $sec_signkey) = ecdhes_generate_key ();
+   
+   my $pk = Crypt::PK::ECC->new();
+   $pk->generate_key('prime256v1');
+   my $svckey=decode_base64($keys->{'keys'}->{'p256dh'});
+   my $import={kty => 'EC',
+      crv => 'P-256',
+      x =>encode_base64url(substr($svckey,0,32)),
+      y  => encode_base64url(substr($svckey,33,64))
+   };
+   my $sk=Crypt::PK::ECC->new(${to_json($import)});
+
+   my $pub_signkey=$pk->export_key_raw('public');
+   my $sec_signkey=$pk->export_key_raw('private');
    my $salt=random_bytes(16);
-   my $shared=ecdhes_encrypt($sec_signkey, $keys->{'keys'}->{'p256dh'});
+   my $shared=$pk->shared_secret($sk);
    my $enc="Content-Encoding: auth\0";
    my $prk=hkdf_extract($shared,$keys->{'keys'}->{'auth'});
  
    my $context="P-256\0\0".
-      pack('c',length(decode_base64($keys->{'keys'}->{'p256dh'}))).
-      decode_base64($keys->{'keys'}->{'p256dh'}).
+      pack('c',length($svckey)).
+      $svckey.
       "\0".pack('c',length($pub_signkey)).
       $pub_signkey;
 
