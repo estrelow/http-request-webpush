@@ -149,59 +149,64 @@ sub postpush($$$) {
 Hola, estamos todos bien
 EOJ
 
-
+   #This is the JWT part
    my $data={  
      'aud' => $keys->{endpoint},
      'exp'=> time() + 86400,
-     'sub'=> 'esf@moller.cl'  
+     'sub'=> 'mailto:esf@moller.cl'  
       };
 
+   my $appk = Crypt::PK::ECC->new();
+   $appk->import_key_raw(decode_base64url($server_key->{private}),'secp256r1');
    my $public=decode_base64url($server_key->{public});
-   my $secret={ kty => 'EC',
-      crv => 'P-256',
-      x => encode_base64url(substr($public,0,32)),
-      y => encode_base64url(substr($public,33,64)),
-      d => $server_key->{private}
-   };
-   my $token = encode_jwt(payload => $data, key => $secret  , alg=>'ES256');
+   my $token = encode_jwt(payload => $data, key => $appk  , alg=>'ES256');
    $send->header( 'Authorization' => "WebPush $token" );
    $send->header('Crypto-Key' => $server_key->{public});
 
-   
+   #Ahora encriptamos el mensaje
+   my $salt=random_bytes(16);
+
+   # $pk va a ser la llave de "sesión"
    my $pk = Crypt::PK::ECC->new();
    $pk->generate_key('prime256v1');
+   my $pub_signkey=$pk->export_key_raw('public');
+   my $sec_signkey=$pk->export_key_raw('private');
    
    #The p256dh key is given to us in X9.62 format. Crypt::PK::ECC should be able
    #to read it as a "raw" format. But it's important to apply the base64url variant
-   my $svckey=decode_base64url($keys->{'keys'}->{'p256dh'});
+   my $ua_public=decode_base64url($keys->{'keys'}->{'p256dh'});
    my $sk=Crypt::PK::ECC->new();
-   $sk->import_key_raw($svckey, 'secp256r1');
+   $sk->import_key_raw($ua_public, 'secp256r1');
 
-   my $pub_signkey=$pk->export_key_raw('public');
-   my $sec_signkey=$pk->export_key_raw('private');
-   my $salt=random_bytes(16);
-   my $shared=$pk->shared_secret($sk);
-   my $enc="Content-Encoding: auth\0";
-   my $prk=hkdf_extract($shared,$keys->{'keys'}->{'auth'});
- 
-   my $context="P-256\0\0".
-      pack('c',length($svckey)).
-      $svckey.
-      "\0".pack('c',length($pub_signkey)).
-      $pub_signkey;
+   my $ecdh_secret=$pk->shared_secret($sk);
+   my $auth_secret= decode_base64url($keys->{'keys'}->{'auth'});
 
-   my $nonceInfo="Content-Encoding: nonce\0".$context;
-   my $cekInfo="Content-Encoding: aesgcm\0".$context;
-   my $nonce=hkdf_expand($prk,'SHA256',12,$nonceInfo);
-   my $contentEncryptionKey = hkdf_expand($prk, 'SHA256',16, $cekInfo);
-   my ($body, $tag) = gcm_encrypt_authenticate("AES", $contentEncryptionKey, $nonce, '', $payload);
+   # HKDF-Extract(salt=auth_secret, IKM=ecdh_secret)
+   my $prk_key=hkdf_extract($ecdh_secret , $auth_secret);
+
+   # HKDF-Expand(PRK_key, key_info, L_key=32)
+   my $key_info="WebPush: info\0".$ua_public.decode_base64url($server_key->{public});
+   my $ikm=hkdf_expand($prk_key,'SHA256',32,$key_info);
+
+   # HKDF-Extract(salt, IKM)
+   my $prk=hkdf_extract($ikm,$salt);
+
+   # HKDF-Expand(PRK, cek_info, L_cek=16)
+   my $cek_info="Content-Encoding: aes128gcm\0";
+   my $cek=hkdf_expand($prk,'SHA256',16,$cek_info);
+
+   # HKDF-Expand(PRK, nonce_info, L_nonce=12)
+   my $nonce_info="Content-Encoding: nonce\0";
+   my $nonce= hkdf_expand($prk,'SHA256',12,$nonce_info);
+
+   my ($body, $tag) = gcm_encrypt_authenticate("AES", $cek, $nonce, '', $payload);
    $body .= $tag;
 
    $send->header('Encryption' => encode_base64url($salt));
    $send->header('Crypto-Key' => "dh=". encode_base64url($pub_signkey)."; p256ecdsa=". $server_key->{public});
    $send->header('Content-Length' => length($body));
    $send->header('Content-Type' => 'application/octet-stream');
-   $send->header('Content-Encoding' => 'aesgcm');
+   $send->header('Content-Encoding' => 'aes128gcm');
    $send->header('TTL' => '90');
 
    $send->content($body);
