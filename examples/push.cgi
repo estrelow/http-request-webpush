@@ -8,10 +8,10 @@ use JSON;
 use HTTP::Request;
 use LWP::UserAgent;
 use Crypt::JWT qw(encode_jwt);
-use MIME::Base64 qw( decode_base64 encode_base64 encode_base64url);
+use MIME::Base64 qw( decode_base64 encode_base64 encode_base64url decode_base64url);
 use Crypt::KeyDerivation ':all';
 use Crypt::PRNG qw(random_bytes);
-use Crypt::AuthEnc::GCM;
+use Crypt::AuthEnc::GCM 'gcm_encrypt_authenticate';
 use Crypt::PK::ECC 'ecc_shared_secret';
 
 my $req=new CGI;
@@ -156,7 +156,7 @@ EOJ
      'sub'=> 'esf@moller.cl'  
       };
 
-   my $public=decode_base64($server_key->{public});
+   my $public=decode_base64url($server_key->{public});
    my $secret={ kty => 'EC',
       crv => 'P-256',
       x => encode_base64url(substr($public,0,32)),
@@ -170,13 +170,12 @@ EOJ
    
    my $pk = Crypt::PK::ECC->new();
    $pk->generate_key('prime256v1');
-   my $svckey=decode_base64($keys->{'keys'}->{'p256dh'});
-   my $import={kty => 'EC',
-      crv => 'P-256',
-      x =>encode_base64url(substr($svckey,0,32)),
-      y  => encode_base64url(substr($svckey,33,64))
-   };
-   my $sk=Crypt::PK::ECC->new(${to_json($import)});
+   
+   #The p256dh key is given to us in X9.62 format. Crypt::PK::ECC should be able
+   #to read it as a "raw" format. But it's important to apply the base64url variant
+   my $svckey=decode_base64url($keys->{'keys'}->{'p256dh'});
+   my $sk=Crypt::PK::ECC->new();
+   $sk->import_key_raw($svckey, 'secp256r1');
 
    my $pub_signkey=$pk->export_key_raw('public');
    my $sec_signkey=$pk->export_key_raw('private');
@@ -195,9 +194,7 @@ EOJ
    my $cekInfo="Content-Encoding: aesgcm\0".$context;
    my $nonce=hkdf_expand($prk,'SHA256',12,$nonceInfo);
    my $contentEncryptionKey = hkdf_expand($prk, 'SHA256',16, $cekInfo);
-   my $ae = Crypt::AuthEnc::GCM->new("AES", $contentEncryptionKey, $nonce); 
-   my $body=$ae->encrypt_add($payload);
-   my $tag=$ae->encrypt_done();
+   my ($body, $tag) = gcm_encrypt_authenticate("AES", $contentEncryptionKey, $nonce, '', $payload);
    $body .= $tag;
 
    $send->header('Encryption' => encode_base64url($salt));
