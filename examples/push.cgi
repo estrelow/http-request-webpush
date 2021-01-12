@@ -9,10 +9,11 @@ use HTTP::Request;
 use LWP::UserAgent;
 use Crypt::JWT qw(encode_jwt);
 use MIME::Base64 qw( decode_base64 encode_base64 encode_base64url decode_base64url);
-use Crypt::KeyDerivation ':all';
 use Crypt::PRNG qw(random_bytes);
 use Crypt::AuthEnc::GCM 'gcm_encrypt_authenticate';
 use Crypt::PK::ECC 'ecc_shared_secret';
+use Digest::SHA 'hmac_sha256';
+use Encode 'encode_utf8';
 
 my $req=new CGI;
 
@@ -42,6 +43,38 @@ self.addEventListener('push', function(event) {
   );
 });
 EOJ
+
+sub hkdf($$$$) {
+   my $salt=shift();
+   my $ikm=shift();
+   my $info=shift();
+   my $len=shift();
+
+   my $key=hmac_sha256($ikm,$salt);
+  
+   return $key unless ($info);
+   my $infoHmac= hmac_sha256(encode_utf8("$info\cA"),$key);  
+
+   return substr($infoHmac,0,$len);
+
+}
+
+sub createInfo($$$) {
+
+   my $type=shift();
+   my $clientkey=shift();
+   my $serverkey=shift();
+
+   my $info="Content-Encoding: $type\0";
+   $info .="P-256\0";
+   $info .= pack('n',length($clientkey));
+   $info .= $clientkey;
+   $info .= pack('n',length($serverkey));
+   $info .= $serverkey;
+   return $info;
+
+}
+
 
 
 sub renderpush($$) {
@@ -145,9 +178,8 @@ sub postpush($$$) {
 
    my $send=HTTP::Request->new(POST => $keys->{endpoint});
 
-   my $payload= <<'EOJ';
-Hola, estamos todos bien
-EOJ
+   my $payload= 'Hola, estamos todos bien';
+
 
    #This is the JWT part
    my $data={  
@@ -181,28 +213,23 @@ EOJ
    my $ecdh_secret=$pk->shared_secret($sk);
    my $auth_secret= decode_base64url($keys->{'keys'}->{'auth'});
 
+   my $key_info="WebPush: info\0$ua_public$pub_signkey";
    # HKDF-Extract(salt=auth_secret, IKM=ecdh_secret)
-   my $prk_key=hkdf_extract($ecdh_secret , $auth_secret);
-
    # HKDF-Expand(PRK_key, key_info, L_key=32)
-   my $key_info="WebPush: info\0".$ua_public.decode_base64url($server_key->{public});
-   my $ikm=hkdf_expand($prk_key,'SHA256',32,$key_info);
-
-   # HKDF-Extract(salt, IKM)
-   my $prk=hkdf_extract($ikm,$salt);
+   my $prk=hkdf($auth_secret, $ecdh_secret, $key_info,32);
 
    # HKDF-Expand(PRK, cek_info, L_cek=16)
-   my $cek_info="Content-Encoding: aes128gcm\0";
-   my $cek=hkdf_expand($prk,'SHA256',16,$cek_info);
+   my $cek_info=createInfo("aesgcm",$ua_public,$pub_signkey);
+   my $cek=hkdf($salt,$prk,$cek_info,16);
 
    # HKDF-Expand(PRK, nonce_info, L_nonce=12)
-   my $nonce_info="Content-Encoding: nonce\0";
-   my $nonce= hkdf_expand($prk,'SHA256',12,$nonce_info);
+   my $nonce_info=createInfo("nonce",$ua_public,$pub_signkey);
+   my $nonce= hkdf($salt, $prk,$nonce_info,12);
 
    my ($body, $tag) = gcm_encrypt_authenticate("AES", $cek, $nonce, '', $payload);
    $body .= $tag;
 
-   $send->header('Encryption' => encode_base64url($salt));
+   $send->header('Encryption' => "salt=".encode_base64url($salt));
    $send->header('Crypto-Key' => "dh=". encode_base64url($pub_signkey)."; p256ecdsa=". $server_key->{public});
    $send->header('Content-Length' => length($body));
    $send->header('Content-Type' => 'application/octet-stream');
@@ -211,11 +238,21 @@ EOJ
 
    $send->content($body);
 
+   print "\np256:".encode_base64url($pub_signkey).", ".encode_base64url($sec_signkey);
+   print "\nsalt:".encode_base64url($salt);
+   print "\nIKM: ".encode_base64url($ecdh_secret);
+   print "\nPRK: ".encode_base64url($prk);
+   print "\nCEK: ".encode_base64url($cek);
+   print "\nNONCE:".encode_base64url($nonce);
+
    my $ua = LWP::UserAgent->new;
    my $response = $ua->request($send);
    print $response->code();
    print "\n";
    print $response->decoded_content;
+   print $response->header('Location');
+   print "\n";
+   print $response->header('Link');
 
 }
 
