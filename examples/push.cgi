@@ -53,7 +53,7 @@ sub hkdf($$$$) {
    my $key=hmac_sha256($ikm,$salt);
   
    return $key unless ($info);
-   my $infoHmac= hmac_sha256(encode_utf8("$info\cA"),$key);  
+   my $infoHmac= hmac_sha256($info,chr(1),$key);  
 
    return substr($infoHmac,0,$len);
 
@@ -65,8 +65,8 @@ sub createInfo($$$) {
    my $clientkey=shift();
    my $serverkey=shift();
 
-   my $info="Content-Encoding: $type\0";
-   $info .="P-256\0";
+   my $info="Content-Encoding: $type".chr(0);
+   $info .="P-256.".chr(0);
    $info .= pack('n',length($clientkey));
    $info .= $clientkey;
    $info .= pack('n',length($serverkey));
@@ -193,7 +193,7 @@ sub postpush($$$) {
    my $public=decode_base64url($server_key->{public});
    my $token = encode_jwt(payload => $data, key => $appk  , alg=>'ES256');
    $send->header( 'Authorization' => "WebPush $token" );
-   $send->header('Crypto-Key' => $server_key->{public});
+   #$send->header('Crypto-Key' => $server_key->{public});
 
    #Ahora encriptamos el mensaje
    my $salt=random_bytes(16);
@@ -213,24 +213,26 @@ sub postpush($$$) {
    my $ecdh_secret=$pk->shared_secret($sk);
    my $auth_secret= decode_base64url($keys->{'keys'}->{'auth'});
 
-   my $key_info="WebPush: info\0$ua_public$pub_signkey";
+
+   #Some docs establish this string as Content-Encoding: auth
+   my $key_info="WebPush: info".chr(0).$ua_public.$pub_signkey;
    # HKDF-Extract(salt=auth_secret, IKM=ecdh_secret)
    # HKDF-Expand(PRK_key, key_info, L_key=32)
    my $prk=hkdf($auth_secret, $ecdh_secret, $key_info,32);
 
    # HKDF-Expand(PRK, cek_info, L_cek=16)
-   my $cek_info=createInfo("aesgcm",$ua_public,$pub_signkey);
+   my $cek_info='Content-Encoding: aes128gcm'.chr(0);
    my $cek=hkdf($salt,$prk,$cek_info,16);
 
    # HKDF-Expand(PRK, nonce_info, L_nonce=12)
-   my $nonce_info=createInfo("nonce",$ua_public,$pub_signkey);
+   my $nonce_info='Content-Encoding: nonce'.chr(0);
    my $nonce= hkdf($salt, $prk,$nonce_info,12);
 
-   my ($body, $tag) = gcm_encrypt_authenticate("AES", $cek, $nonce, '', $payload);
-   $body .= $tag;
+   my ($body, $tag) = gcm_encrypt_authenticate("AES", $cek, $nonce, '', $payload.chr(2).chr(0));
+   $body = $salt."\x00\x00\x10\x00\x41".$pub_signkey.$body.$tag;
 
    $send->header('Encryption' => "salt=".encode_base64url($salt));
-   $send->header('Crypto-Key' => "dh=". encode_base64url($pub_signkey)."; p256ecdsa=". $server_key->{public});
+   $send->header('Crypto-Key' => "p256ecdsa=". $server_key->{public});
    $send->header('Content-Length' => length($body));
    $send->header('Content-Type' => 'application/octet-stream');
    $send->header('Content-Encoding' => 'aes128gcm');
@@ -244,6 +246,7 @@ sub postpush($$$) {
    print "\nPRK: ".encode_base64url($prk);
    print "\nCEK: ".encode_base64url($cek);
    print "\nNONCE:".encode_base64url($nonce);
+   print "\nPAYLOAD:".encode_base64url($body);
 
    my $ua = LWP::UserAgent->new;
    my $response = $ua->request($send);
