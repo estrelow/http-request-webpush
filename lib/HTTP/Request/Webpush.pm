@@ -90,6 +90,33 @@ sub authbase64($$$) {
    return $self->auth($pub,$key);
 }
 
+sub reuseecc($$) {
+
+   my $self=shift();
+   return $self->{'ecc'}=shift();
+}
+
+sub subject($$) {
+   my $self=shift();
+   return $self->{'subject'}=shift();
+}
+
+sub encode($$) {
+
+   my $self=shift();
+   my $enc=shift();
+
+   #This method is inherited from HTTP::Message, but here only aes128gcm applies
+   croak 'Only aes128gcm encoding available' unless ($enc eq 'aes128gcm');
+
+   #Check prerequisites
+   croak 'Endpoint must be present for message encoding' unless ($self->url());
+   croak 'Authentication keys must be present for message encoding' unless ($self->{'app-key'});
+   croak 'UA auth params must be present for message encoding' unless ($self->{subscription}->{'keys'}->{'p256dh'} && $self->{subscription}->{'keys'}->{'auth'});
+
+   
+}
+
 sub new($%) {
 
    my ($class, %opts)=@_;
@@ -99,8 +126,11 @@ sub new($%) {
 
    bless $class, $self;
 
-   $self->subscription( $opts{subscription}) if (exists  $opts{subscription});
-   
+   my @Options= ('auth','subscription','authbase64','reuseecc','subject');
+   for (@Options) {
+      &$_($self,$opts{$_}) if (exists $opts{$_});
+   }
+
 }
 
 
@@ -132,7 +162,7 @@ browser workers. This class only covers the Application role. A lot must
 be done on the browser side to setup a full working push notification system.
 
 In practical terms, this class is a glue for all the encription steps involved
-in setting up a RFC8291 message, along with the VAPID scheme.
+in setting up a RFC8291 message, along with the RFC8292 VAPID scheme.
 
 =over 4
 
@@ -154,6 +184,19 @@ This sets the authentification key for the VAPID authentication scheme related t
 This can either be a (public, private) pair or an already setup Crypt::PK::ECC object. The public part
 must be the same used earlier in the browser environment in the PushManager.subscribe() applicationServerKey option.
 The key pair can be passed as URL safe base64 strings using the authbase64() variant.
+
+=item $r->reuseecc($ecc) #ecc being a Crypt::PK::ECC ref
+
+By default, HTTP::Request::Webpush creates a new P-256 key pair for the encryption
+step each time. In large push batches this can be time consuming. You can
+reuse the same previously setup key pair in repeated messages using this method.
+
+=item $r->subject('mailto:jdoe@some.com')
+
+This establish the contact information related to the origin of the push service. This method
+isn't enforced since RFC8292 mentions this as a SHOULD practice. But, if a valid contact information
+is not included, the browser push service is likely to bounce the message. The URI passed is 
+used as the 'sub' claim in the authentication JWT.
 
 =back
 
