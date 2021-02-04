@@ -16,28 +16,90 @@ use Crypt::PK::ECC 'ecc_shared_secret';
 use Digest::SHA 'hmac_sha256';
 use Carp;
 
+#References:
+#
+# Tutorials and code samples:
+#  https://developers.google.com/web/updates/2016/03/web-push-encryption
+#  https://developers.google.com/web/fundamentals/push-notifications/web-push-protocol
+#  https://adiary.adiary.jp/0391
+# Standards:
+#  https://tools.ietf.org/html/rfc8291
+
+#================================================================
+# hkdf()
+#
+# Calculates a key derivation using HMAC
+# This is a simplified version based on Mat Scales jscript code
+# see https://developers.google.com/web/updates/2016/03/web-push-encryption
+#
+# Notes: all args are expected to be binary strings, as the result
+#================================================================
+sub _hkdf($$$$$) {
+   my $self=shift();
+   my $salt=shift();
+   my $ikm=shift();
+   my $info=shift();
+   my $len=shift();
+
+   my $key=hmac_sha256($ikm,$salt);
+   my $infoHmac= hmac_sha256($info,chr(1),$key);  
+
+   return substr($infoHmac,0,$len);
+}
+
+
+sub subscription($$) {
+
+   my $self=shift();
+   my $subscription=shift();
+
+   my $agent;
+
+   if (ref $subscription eq 'HASH') {
+      $agent=$subscription;
+   } else {
+      try {$agent=from_json($subscription); };
+   }
+
+   croak "Can't process subscription object" unless ($agent);
+   croak "Subscription must include endpoint" unless (exists $agent->{endpoint});
+
+   $self->uri($agent->{endpoint});
+   $self->{subcription}=$agent;
+   return $agent;
+}
+
+sub auth($@) {
+
+   my $self=shift();
+
+   if (scalar @_ == 2) {
+      $self->{'app-pub'}=shift();
+      $self->{'app-key'}=shift();
+   } elsif (scalar (@_) == 1 && ref $_ eq 'Crypt::PK::ECC') {
+      $self->{'app-pub'}=$_->export_key_raw('public');
+      $self->{'app-key'}=$_->export_key_raw('private');
+   }
+}
+
+sub authbase64($$$) {
+
+   my $self=shift();
+   my $pub=decode_base64url(shift());
+   my $key=decode_base64url(shift());
+   return $self->auth($pub,$key);
+}
+
 sub new($%) {
 
    my ($class, %opts)=@_;
 
-   croak 'subscription must me specified' unless (exists $opts{subscription});
-   croak 'key must me specified' unless (exists $opts{key});
-
    my $self= $class->SUPER::new();
    $self->method('POST');
 
-   my $agent;
-   if (ref $opts{subscription} eq 'HASH') {
-      $agent=$opts{subscription};
-   } else {
-      $agent=decode_json($opts{subscription});
-   }
+   bless $class, $self;
 
-   croak "subscription spec must containt endpoint" unless (exists $agent->{endpoint});
-   $self->uri($agent->{endpoint});
-   
-   
-   
+   $self->subscription( $opts{subscription}) if (exists  $opts{subscription});
    
 }
 
@@ -55,6 +117,45 @@ HTTP::Request::Webpush - HTTP Request for web push notifications
 =head1 VERSION
 
 version 0.01
+
+=head1 SYNOPSIS
+
+  some here
+
+
+=head1 DESCRIPTION
+
+C<HTTP::Request::Webpush> produces an HTTP::Request for Application-side Webpush
+notifications as described on RFC8291. In this scheme, an Application is a 
+server-side component that sends push notification to previously subscribed
+browser workers. This class only covers the Application role. A lot must 
+be done on the browser side to setup a full working push notification system.
+
+In practical terms, this class is a glue for all the encription steps involved
+in setting up a RFC8291 message, along with the VAPID scheme.
+
+=over 4
+
+=item $r->subscription($hash_reference)
+
+=item $r->subscription('{"endpoint":"https://foo/fooer","expirationTime":null,"keys":{"p256dh":"BCNS...","auth":"dZ..."}}');
+
+This sets the subcription object related to this notification service. This should be the same object
+returned inside the browser environment using the PushManager.subscribe() method. The argument can
+be either a JSON string or a previously setup hash reference.
+
+=item $r->auth($pk) #pk being a Crypt::PK::ECC ref
+
+=item $r->auth($pub_bin, $priv_bin)
+
+=item $r->authbase64('BCAI00zPAbxEVU5w8D1kZXVs2Ro--FmpQNMOd0S0w1_5naTLZTGTYNqIt7d97c2mUDstAWOCXkNKecqgS4jARA8','M6xy5prDBhJNlOGnOkMekyAQnQSWKuJj1cD06SUQTow')
+
+This sets the authentification key for the VAPID authentication scheme related to the push service.
+This can either be a (public, private) pair or an already setup Crypt::PK::ECC object. The public part
+must be the same used earlier in the browser environment in the PushManager.subscribe() applicationServerKey option.
+The key pair can be passed as URL safe base64 strings using the authbase64() variant.
+
+=back
 
 =cut
 
