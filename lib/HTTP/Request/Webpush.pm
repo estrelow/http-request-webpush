@@ -50,14 +50,14 @@ sub subscription($$) {
    if (ref $subscription eq 'HASH') {
       $agent=$subscription;
    } else {
-      try {$agent=from_json($subscription); };
+      eval {$agent=from_json($subscription); };
    }
 
    croak "Can't process subscription object" unless ($agent);
    croak "Subscription must include endpoint" unless (exists $agent->{endpoint});
 
    $self->uri($agent->{endpoint});
-   $self->{subcription}=$agent;
+   $self->{subscription}=$agent;
    return $agent;
 }
 
@@ -72,6 +72,8 @@ sub auth($@) {
       $self->{'app-pub'}=$_->export_key_raw('public');
       $self->{'app-key'}=$_->export_key_raw('private');
    }
+
+   return 1;
 }
 
 sub authbase64($$$) {
@@ -110,7 +112,7 @@ sub encode($$) {
 
    #This is the JWT part
    my $data={  
-     'aud' => $self->{subsription}->{endpoint},
+     'aud' => $self->{subscription}->{endpoint},
      'exp'=> time() + 86400  
    };
    $data->{'sub'}=$self->{'subject'} if ($self->{'subject'});
@@ -127,6 +129,7 @@ sub encode($$) {
    if ($self->{'ecc'}) {
       $pk=$self->{'ecc'};
    } else {
+      $pk=Crypt::PK::ECC->new();
       $pk->generate_key('prime256v1');
    }
 
@@ -195,13 +198,14 @@ sub new($%) {
    my $self= $class->SUPER::new();
    $self->method('POST');
 
-   bless $class, $self;
+   bless $self, $class;
 
    my @Options= ('auth','subscription','authbase64','reuseecc','subject','content');
    for (@Options) {
       &$_($self,$opts{$_}) if (exists $opts{$_});
    }
 
+   return $self;
 }
 
 
@@ -235,7 +239,7 @@ version 0.01
  $message->auth(APP_PUB, APP_KEY);
  $message->subscription($subscription);
  $message->subject('mailto:bobsbeverage@some.com');
- $message->content('Come taste our new lager brand');
+ $message->content('Hello world');
  
  #Additional headers can be applied with inherited HTTP::Response methods
  $message->header('TTL' => '90');
@@ -249,7 +253,7 @@ version 0.01
  my $ecc = Crypt::PK::ECC->new();
  $ecc->generate_key('prime256v1');
  
- for (@cleverly_stored_subcriptions) {
+ for (@cleverly_stored_subscriptions) {
     my $message=HTTP::Request::Webpush->new(reuseecc => $ecc);
     $message->subscription($_);
     $message->subject('mailto:bobsbeverage@some.com');
