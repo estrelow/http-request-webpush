@@ -6,12 +6,12 @@ use ExtUtils::MakeMaker;
  
 WriteMakefile(
     NAME            => 'HTTP::Request::Webpush',
-    VERSION_FROM    => 'lib/HTTP/Request/webpush.pm',
+    VERSION_FROM    => 'lib/HTTP/Request/Webpush.pm',
     test => {TESTS => 't/*.t'},
     LICENSE => "apache_2_0",
     AUTHOR => 'Erich Strelow <estrelow@cpan.org',
     PREREQ_PM => {
-       "JSON"        => "4.00",
+       "JSON"        => "2.00",
        "Crypt::JWT"  => "0.013",
        "MIME::Base64"=> "3.11",
        "Crypt::PRNG" => "0.048",

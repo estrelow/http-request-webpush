@@ -4,6 +4,8 @@ MANIFEST
 README.md
 lib/HTTP/Request/Webpush.pm
 examples/send.pl
+examples/push.cgi
 t/http-request-webpush.t
 t/http-request-webpush-long.t
 t/http-request-webpush-reuse.t
+Changes

@@ -17,7 +17,7 @@ package HTTP::Request::Webpush;
 use strict 'vars';
 use warnings;
 
-our $VERSION='0.01';
+our $VERSION='0.11';
 
 use base 'HTTP::Request';
 

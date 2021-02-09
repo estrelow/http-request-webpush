@@ -9,3 +9,4 @@ To install this module type the following:
  make install
 
 I've tested this under Mozilla Firefox, Chrome and Edge(Chromium).
+The examples folder containts a CGI self contained sample

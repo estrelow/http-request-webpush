@@ -1,30 +1,69 @@
 #!/usr/bin/perl
+#===========================================================================
+#  push.cgi
+#
+#  This is a perl CGI script to show the web push notifications
+#  feature. 
+#
+#  Usage:
+#    [USER END]
+#    On a modern web browser:
+#    Connect to https://whatever-site-and-path/push.cgi and allow push notifications
+#
+#    [APP END]
+#    From a shell script:
+#    Issue the command 'perl push.cgi cmd=send text="Hello world"'
+#
+#    You can also open push.cgi?cmd=send from a browser, but if it is the same
+#    user end browser, you miss some of the magic
+#
+#  Notes:
+#   This is just a minimal setup, only to show the app end part
+#
+#  Requirements:
+#   This script should be run under https in order to comply to
+#   the callback components policy of the browser's subscription
+#   service
+#
+#   Copyright 2021 Erich Strelow
+#
+#  Licensed under the Apache License, Version 2.0 (the "License");
+#   you may not use this file except in compliance with the License.
+#  You may obtain a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+#  Unless required by applicable law or agreed to in writing, software
+#  distributed under the License is distributed on an "AS IS" BASIS,
+#  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+#  See the License for the specific language governing permissions and
+#  limitations under the License.
+#============================================================================
+
 use strict 'vars';
 use warnings;
+
+#You may change this according to your host. The script neede RW access
+use constant APP_CONF => 'push.conf';
+#This is the app wide authentication key
+my $server_key = { public => 'BCAI00zPAbxEVU5w8D1kZXVs2Ro--FmpQNMOd0S0w1_5naTLZTGTYNqIt7d97c2mUDstAWOCXkNKecqgS4jARA8',
+   private => 'M6xy5prDBhJNlOGnOkMekyAQnQSWKuJj1cD06SUQTow'};
 
 use CGI;
 use Config::IniFiles;
 use JSON;
-use HTTP::Request;
+use HTTP::Request::Webpush;
 use LWP::UserAgent;
-use Crypt::JWT qw(encode_jwt);
 use MIME::Base64 qw( encode_base64url decode_base64url);
-use Crypt::PRNG qw(random_bytes);
-use Crypt::AuthEnc::GCM 'gcm_encrypt_authenticate';
-use Crypt::PK::ECC 'ecc_shared_secret';
-use Digest::SHA 'hmac_sha256';
 
 my $req=new CGI;
 
-
 my $cmd=$req->param('cmd') || $req->url_param('cmd');
 
-#Defino la llave RSA con la que voy a conversar con el servicio push-web
-my $server_key = { public => 'BCAI00zPAbxEVU5w8D1kZXVs2Ro--FmpQNMOd0S0w1_5naTLZTGTYNqIt7d97c2mUDstAWOCXkNKecqgS4jARA8',
-   private => 'M6xy5prDBhJNlOGnOkMekyAQnQSWKuJj1cD06SUQTow'};
 
 #=======================================================================================
-# Este el el script que se instala en el cliente para mostrar las notificaciones
+# Worker JS Script. This gets installed in the UA operating system in order to
+# receive push messages
 #=======================================================================================
 my $worker= <<'EOJ';
 // Register event listener for the 'push' event.
@@ -36,60 +75,28 @@ self.addEventListener('push', function(event) {
 
   // Keep the service worker alive until the notification is created.
   event.waitUntil(
-    self.registration.showNotification('Venta Virtual VIVIEN', {
+    self.registration.showNotification('HTTP::Request::Webpush example', {
       body: payload,
     })
   );
 });
 EOJ
 
-sub hkdf($$$$) {
-   my $salt=shift();
-   my $ikm=shift();
-   my $info=shift();
-   my $len=shift();
 
-   my $key=hmac_sha256($ikm,$salt);
-  
-   return $key unless ($info);
-   my $infoHmac= hmac_sha256($info,chr(1),$key);  
-
-   return substr($infoHmac,0,$len);
-
-}
-
-sub createInfo($$$) {
-
-   my $type=shift();
-   my $clientkey=shift();
-   my $serverkey=shift();
-
-   my $info="Content-Encoding: $type".chr(0);
-   $info .="P-256.".chr(0);
-   $info .= pack('n',length($clientkey));
-   $info .= $clientkey;
-   $info .= pack('n',length($serverkey));
-   $info .= $serverkey;
-   return $info;
-
-}
-
-
-
-sub renderpush($$) {
-
-   my $user=shift();
-   my $session=shift();
+#=======================================================================================
+# Subscription  HTML/JS Script. This is the end user HTML page that
+# launches the subcription the first time
+#=======================================================================================
+sub renderpush {
 
    my $path=$req->url();
    my $cmd=$req->url(-relative => 1);
-   #$path =~ s/\/$cmd$//;
    my $worker = "$path?cmd=service-worker.js";
    my $subscribe= "$path?cmd=subscribe";
 
    print <<"EOH";
 <div class='push'>
-<a href="#" onclick='return subscribe()'>Activar notificaciones</a>
+<a href="#" onclick='return subscribe()'>Activate push notifications</a>
 <script type='text/javascript'>
 function isSupported() {
   if (!('serviceWorker' in navigator)) {
@@ -154,8 +161,8 @@ EOH
 sub subscribe($) {
 
    my $opt=shift();
-   my $conf=Config::IniFiles->new(-file => "push.conf", -nocase => 1);
-   die "Falla conf" unless ($conf);
+   my $conf=Config::IniFiles->new(-file => APP_CONF, -nocase => 1);
+   die "Configuration fail" unless ($conf);
    $conf->newval('subscription','data',$opt);
    $conf->RewriteConfig;
    my $success='{ "data": { "success": "true" } }';
@@ -164,91 +171,28 @@ sub subscribe($) {
 
 }
 
-sub postpush($$$) {
+sub postpush($$) {
 
    my $session=shift();
    my $text=shift();
-   my $link=shift();
 
-   my $conf=Config::IniFiles->new(-file => "push.conf", -nocase => 1);
-   die "Falla config" unless($conf);
+   my $conf=Config::IniFiles->new(-file => APP_CONF, -nocase => 1);
+   die "Configuration fail" unless($conf);
    my $json=$conf->val($session,'data');
    my $keys=from_json($json);
 
-   my $send=HTTP::Request->new(POST => $keys->{endpoint});
-
-   my $payload= 'Hola, estamos todos bien';
-
-
-   #This is the JWT part
-   my $data={  
-     'aud' => $keys->{endpoint},
-     'exp'=> time() + 86400,
-     'sub'=> 'mailto:esf@moller.cl'  
-      };
-
-   my $appk = Crypt::PK::ECC->new();
-   $appk->import_key_raw(decode_base64url($server_key->{private}),'secp256r1');
-   my $public=decode_base64url($server_key->{public});
-   my $token = encode_jwt(payload => $data, key => $appk  , alg=>'ES256');
-   $send->header( 'Authorization' => "WebPush $token" );
-   #$send->header('Crypto-Key' => $server_key->{public});
-
-   #Ahora encriptamos el mensaje
-   my $salt=random_bytes(16);
-
-   # $pk va a ser la llave de "sesión"
-   my $pk = Crypt::PK::ECC->new();
-   $pk->generate_key('prime256v1');
-   my $pub_signkey=$pk->export_key_raw('public');
-   my $sec_signkey=$pk->export_key_raw('private');
-   
-   #The p256dh key is given to us in X9.62 format. Crypt::PK::ECC should be able
-   #to read it as a "raw" format. But it's important to apply the base64url variant
-   my $ua_public=decode_base64url($keys->{'keys'}->{'p256dh'});
-   my $sk=Crypt::PK::ECC->new();
-   $sk->import_key_raw($ua_public, 'secp256r1');
-
-   my $ecdh_secret=$pk->shared_secret($sk);
-   my $auth_secret= decode_base64url($keys->{'keys'}->{'auth'});
-
-
-   #An earlier draft established this string as Content-Encoding: auth
-   my $key_info="WebPush: info".chr(0).$ua_public.$pub_signkey;
-   # HKDF-Extract(salt=auth_secret, IKM=ecdh_secret)
-   # HKDF-Expand(PRK_key, key_info, L_key=32)
-   my $prk=hkdf($auth_secret, $ecdh_secret, $key_info,32);
-
-   # HKDF-Expand(PRK, cek_info, L_cek=16)
-   my $cek_info='Content-Encoding: aes128gcm'.chr(0);
-   my $cek=hkdf($salt,$prk,$cek_info,16);
-
-   # HKDF-Expand(PRK, nonce_info, L_nonce=12)
-   my $nonce_info='Content-Encoding: nonce'.chr(0);
-   my $nonce= hkdf($salt, $prk,$nonce_info,12);
-
-   my ($body, $tag) = gcm_encrypt_authenticate('AES', $cek, $nonce, '', $payload.chr(2).chr(0));
-   $body = $salt."\x00\x00\x10\x00\x41".$pub_signkey.$body.$tag;
-
-   $send->header('Encryption' => "salt=".encode_base64url($salt));
-   $send->header('Crypto-Key' => "p256ecdsa=". $server_key->{public});
-   $send->header('Content-Length' => length($body));
-   $send->header('Content-Type' => 'application/octet-stream');
-   $send->header('Content-Encoding' => 'aes128gcm');
+   my $send=HTTP::Request::Webpush->new(subscription => $keys);
+   $send->authbase64($server_key->{public}, $server_key->{private});
+   $send->content($text);
+   $send->subject('mailto:estrelow@cpan.org');
+   $send->encode();
    $send->header('TTL' => '90');
-
-   $send->content($body);
-
-   print "\np256:".encode_base64url($pub_signkey).", ".encode_base64url($sec_signkey);
-   print "\nsalt:".encode_base64url($salt);
-   print "\nIKM: ".encode_base64url($ecdh_secret);
-   print "\nPRK: ".encode_base64url($prk);
-   print "\nCEK: ".encode_base64url($cek);
-   print "\nNONCE:".encode_base64url($nonce);
-   print "\nPAYLOAD:".encode_base64url($body);
 
    my $ua = LWP::UserAgent->new;
    my $response = $ua->request($send);
+   print $req->header("text/plain");
+
+   print "Message sent\n";
    print $response->code();
    print "\n";
    print $response->decoded_content;
@@ -265,10 +209,11 @@ if ($cmd eq 'service-worker.js') {
 } elsif ($cmd eq 'subscribe') {
    subscribe($req->param('POSTDATA'));
 }  elsif ($cmd eq 'send') {
-   postpush('subscription','Hello world','url');
+   my $text= $req->param('text') || 'Hello world';
+   postpush('subscription',$text);
 
 }   else {
    print $req->header('text/html');
-   renderpush('x','y');
+   renderpush;
 }
 
