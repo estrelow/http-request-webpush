@@ -125,8 +125,10 @@ sub encode($$) {
    croak 'Message payload must be 3992 bytes or less' unless (length($self->content) <= 3992);
 
    #This is the JWT part
+   my $origin=URI->new($self->{subscription}->{endpoint});
+   $origin->path_query('');
    my $data={  
-     'aud' => $self->{subscription}->{endpoint},
+     'aud' => "$origin",
      'exp'=> time() + 86400  
    };
    $data->{'sub'}=$self->{'subject'} if ($self->{'subject'});
@@ -180,12 +182,11 @@ sub encode($$) {
 
    $self->content($body);
    $self->remove_header('Content-Length', 'Content-MD5','Content-Encoding','Content-Type','Encryption','Crypto-Key');
-   $self->header('Encryption' => "salt=".encode_base64url($salt));
-   $self->header('Crypto-Key' => "p256ecdsa=". encode_base64url($self->{'app-pub'}));
+   #$self->header('Encryption' => "salt=".encode_base64url($salt));
+   $self->header('Crypto-Key' => "p256ecdsa=". encode_base64url($self->{'app-pub'}) );
    $self->header('Content-Length' => length($body));
    $self->header('Content-Type' => 'application/octet-stream');
    $self->header('Content-Encoding' => 'aes128gcm');
-
    return 1;
 }
 

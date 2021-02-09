@@ -10,7 +10,7 @@ my $server_key = { public => 'BCAI00zPAbxEVU5w8D1kZXVs2Ro--FmpQNMOd0S0w1_5naTLZT
 
 my $send=HTTP::Request::Webpush->new();
 
-$send->subscription('{"endpoint":"https://fcm.googleapis.com/fcm/send/cNwZxU5rL1I:APA91bEVVZDjabeF6woURsF5jci3RjdDtkAb4QrUx295L9wxXaxrb7kKSkMnKaNSSwI18Lbv8S40fAkHFDvcXeq4DlE15ErGnzdTniYluSeZKh28kjqiuT7xIg75nnySAKILMjCzQBx-","expirationTime":null,"keys":{"p256dh":"BCNSUztj4OFfIOqZNt2cDg0vICWiaYtxNRN48rd5fp8roNQuNWlVoIZuIr-49hOwgJxadqy7rVnkqiuk8GZ6b0Q","auth":"dZ4T8XDVH_u9QhcXQSFUiQ"}}');
+$send->subscription('{"endpoint":"https://bn3p.notify.windows.com/w/?token=BQYAAACgmmGJB%2fT6GgtS%2bZsefznjZgOG1kd2d05B80MIiQ%2fn5JKOOjrE7Bep8JYJoqRiAW67%2fyoq69DRfLFaZHxhBiYbWh6HfdUd0SbAAwe6%2fvk0ClM0a4%2bEfX0fzUflmVix%2fV8uM1lFqVidtOLLs20lnWw%2bH5NshsmZDoCANpXCcQBWTUVc8cRAhgv8MFWTSCgRMLhfVTeuvbEpxVDX0NvmtyPIXUw8tnQ1kWRqVo0muezAgD7aRUikj3hOzYkfQ56sLaK8e%2fGFO6QPY7sQqdDUtFqLiWSlEVq6GqFe6jEUKl7J8JQSQkrepwCkS9ZcnXkFTUg%3d","expirationTime":null,"keys":{"p256dh":"BJf12N26ktxlIScwL_XEsGXpc_z9oSjyJJLreyKza3SrwUwmvOb1dAu5IvxDkA5P2e23EUTOJbDovMEx0ZB0Qrs","auth":"tovh9rG0Qz4dYfv3n778ng"}}');
 $send->subject('mailto:esf@moller.cl');
 $send->authbase64($server_key->{public}, $server_key->{private});
 $send->content("Billy Jean's not my lover");

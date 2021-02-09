@@ -1,6 +1,9 @@
 LICENSE
 Makefile.PL
 MANIFEST
+README.md
 lib/HTTP/Request/Webpush.pm
 examples/send.pl
 t/http-request-webpush.t
+t/http-request-webpush-long.t
+t/http-request-webpush-reuse.t

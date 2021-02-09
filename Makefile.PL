@@ -18,5 +18,6 @@ WriteMakefile(
        "Crypt::AuthEnc::GCM" => "0.049",
        "Crypt::PK::ECC" => "0.042",
        "Digest::SHA" => "5.83",
-       "Carp"=> "1.00" }
+       "Carp"=> "1.00",
+       "URI"  =>"1.00"   }
 );

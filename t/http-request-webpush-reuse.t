@@ -2,16 +2,13 @@
 use strict;
 use warnings;
 
-use Test::More tests => 16;
+use Test::More tests => 12;
 use Crypt::PRNG qw(random_bytes);
 use Crypt::PK::ECC 'ecc_shared_secret';
 use MIME::Base64 qw( encode_base64url decode_base64url);
 use Digest::SHA 'hmac_sha256';
 use Crypt::AuthEnc::GCM 'gcm_decrypt_verify';
-use Crypt::JWT qw(decode_jwt);
-use URI;
 
-use constant ENDPOINT => "https://foo";
 
 #================================================================
 # hkdf()
@@ -40,7 +37,6 @@ BEGIN { use_ok('HTTP::Request::Webpush') };
 my $send=new_ok( 'HTTP::Request::Webpush' );
 
 #Now setup a dummy subscription endpoint
-
 my $ua_publicKey= "BMj40clWPSKfZTdyaQQjFoEozKUXI3aEZDBFC_2dr0I5ZWX7bvahx3iDRJjbXf6t9FuSuuAq57cEb_R48lmVzPA";
 my $ua_privateKey= "ibx1ebRZyWiWNB_fHXHmiLROYXDXD_II8EZ1nqef4VA";
 my $auth=random_bytes(16);
@@ -48,25 +44,30 @@ my $auth=random_bytes(16);
 my $app_publicKey= "BDIlKk-A0gBOnZ9DWHoEzSFe_HZbDEAY6yYgN6ILmdVC3mS8laszyLPI6FJhVXZpsJPSYlBkAyYrKRVBdD9fydY";
 my $app_privateKey= "cLERT3eZx0JfS0pIX6orz_uGBzf1JV0I7PWGCaGfkbg";
 
-my $service={"endpoint"=>ENDPOINT,
+my $service={"endpoint"=>"https://foo",
    "expirationTime" => 0,
    "keys"=> {
       "p256dh"=>$ua_publicKey,
       "auth"=> encode_base64url($auth)}};
 
-ok($send->subscription($service) , 'Can accept subscription data');
-ok($send->authbase64($ua_publicKey,$ua_privateKey), 'Can accept auth data');
+ok($send->subscription($service) );
+ok($send->authbase64($ua_publicKey,$ua_privateKey));
+
+my $reuse=Crypt::PK::ECC->new(); #For encryption
+$reuse->generate_key('prime256v1');
+
+ok ($send->reuseecc($reuse));
 
 my $payload="Hello world";
 $send->content($payload);
-ok($send->encode , 'Encoding did\'t blow up');
+ok($send->encode );
 
 my $body=$send->content;
-ok (length($body) >= 104, 'Encrypted content looks long enough');
+ok (length($body) >= 104);
 
 my $salt=substr($body,0,16);
 my $keylength=substr($body,20,1);
-ok ($keylength eq "\x41", 'Keylength magic byte located');
+ok ($keylength eq "\x41");
 
 my $mess_key=substr($body,21,65);
 my $tag=substr($body,-16,16);
@@ -77,7 +78,7 @@ my $sk= Crypt::PK::ECC->new(); #Tis will be the channel key
 
 $sk->import_key_raw(decode_base64url($ua_privateKey), 'secp256r1');
 
-ok ($mk->import_key_raw($mess_key, 'secp256r1'), 'The body preamble seems able');
+ok ($mk->import_key_raw($mess_key, 'secp256r1'));
 
 my $shared=$sk->shared_secret($mk);
 
@@ -92,26 +93,13 @@ my $nonce= hkdf($salt, $prk,$nonce_info,12);
 
 my $decrypt=gcm_decrypt_verify('AES', $cek, $nonce, '', $encoded, $tag);
 
-ok ($decrypt, 'GCM decrypt didn\'t blow up');
+ok ($decrypt);
 
 #Remove the trailing
 $decrypt = substr($decrypt,0,-2);
-ok ($decrypt eq $payload, 'Payload confirmed');
+ok ($decrypt eq $payload);
 
-#The JWT part
-my $jwt=$send->header("Authorization");
-ok ($jwt, 'Auth header present');
+#Was it really the reused key?
+ok ($reuse->export_key_raw('public') eq $mess_key);
 
-$jwt =~ /WebPush (.*)$/;
-$jwt=$1;
-ok($jwt,'JWT was here');
-
-my $appk = Crypt::PK::ECC->new();
-$appk->import_key_raw(decode_base64url($ua_publicKey),'secp256r1');
-my $vapid=decode_jwt(token =>$jwt,key => $appk);
-
-ok ($vapid, 'JWT made sense');
-ok ($vapid->{aud}, 'JWT confirmed');
-ok ($vapid->{aud} eq ENDPOINT, 'JWT match');
-ok ($vapid->{'exp'} > 0, 'JWT had expiration claim');
 
