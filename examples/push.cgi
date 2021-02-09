@@ -8,12 +8,11 @@ use JSON;
 use HTTP::Request;
 use LWP::UserAgent;
 use Crypt::JWT qw(encode_jwt);
-use MIME::Base64 qw( decode_base64 encode_base64 encode_base64url decode_base64url);
+use MIME::Base64 qw( encode_base64url decode_base64url);
 use Crypt::PRNG qw(random_bytes);
 use Crypt::AuthEnc::GCM 'gcm_encrypt_authenticate';
 use Crypt::PK::ECC 'ecc_shared_secret';
 use Digest::SHA 'hmac_sha256';
-use Encode 'encode_utf8';
 
 my $req=new CGI;
 
@@ -214,7 +213,7 @@ sub postpush($$$) {
    my $auth_secret= decode_base64url($keys->{'keys'}->{'auth'});
 
 
-   #Some docs establish this string as Content-Encoding: auth
+   #An earlier draft established this string as Content-Encoding: auth
    my $key_info="WebPush: info".chr(0).$ua_public.$pub_signkey;
    # HKDF-Extract(salt=auth_secret, IKM=ecdh_secret)
    # HKDF-Expand(PRK_key, key_info, L_key=32)
@@ -228,7 +227,7 @@ sub postpush($$$) {
    my $nonce_info='Content-Encoding: nonce'.chr(0);
    my $nonce= hkdf($salt, $prk,$nonce_info,12);
 
-   my ($body, $tag) = gcm_encrypt_authenticate("AES", $cek, $nonce, '', $payload.chr(2).chr(0));
+   my ($body, $tag) = gcm_encrypt_authenticate('AES', $cek, $nonce, '', $payload.chr(2).chr(0));
    $body = $salt."\x00\x00\x10\x00\x41".$pub_signkey.$body.$tag;
 
    $send->header('Encryption' => "salt=".encode_base64url($salt));
