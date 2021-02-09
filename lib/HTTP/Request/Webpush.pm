@@ -17,7 +17,7 @@ package HTTP::Request::Webpush;
 use strict 'vars';
 use warnings;
 
-our $VERSION='0.11';
+our $VERSION='0.12';
 
 use base 'HTTP::Request';
 
@@ -236,7 +236,7 @@ HTTP::Request::Webpush - HTTP Request for web push notifications
 
 =head1 VERSION
 
-version 0.01
+version 0.12
 
 =head1 SYNOPSIS
 
@@ -287,7 +287,7 @@ browser worker(s). This class only covers the Application role. A lot must
 be done on the browser side to setup a full working push notification system.
 
 In practical terms, this class is a glue for all the encryption steps involved
-in setting up a RFC8291 message, along with the <RFC8292|https://tools.ietf.org/html/rfc8291> VAPID scheme.
+in setting up a RFC8291 message, along with the L<RFC8292|https://tools.ietf.org/html/rfc8291> VAPID scheme.
 
 =over 4
 
@@ -312,7 +312,7 @@ be either a JSON string or a previously setup hash reference.
 =item $r->authbase64('BCAI00zPAbxEVU5w8D1kZXVs2Ro--FmpQNMOd0S0w1_5naTLZTGTYNqIt7d97c2mUDstAWOCXkNKecqgS4jARA8','M6xy5prDBhJNlOGnOkMekyAQnQSWKuJj1cD06SUQTow')
 
 This sets the authentication key for the VAPID authentication scheme related to this push service.
-This can either be a (public, private) pair or an already setup Crypt::PK::ECC object. The public part
+This can either be a (public, private) pair or an already setup L<Crypt::PK::ECC> object. The public part
 must be the same used earlier in the browser environment in the PushManager.subscribe() applicationServerKey option.
 The key pair can be passed as URL safe base64 strings using the authbase64() variant.
 
@@ -352,12 +352,12 @@ will be the binary body of the encrypted message.
 =head1 REFERENCES
 
 This class relies on L<Digest::SHA> for the HKDF derivation, 
-L<Crypt::AuthEnc::GCM> for the encryption intself, L<Crypt::PK::ECC> for key management and
+L<Crypt::AuthEnc::GCM> for the encryption itself, L<Crypt::PK::ECC> for key management and
 L<Crypt::PRNG> for the salt.
 
 RFC8291 establish the encription steps: L<https://tools.ietf.org/html/rfc8291>
 
-RFC8291 establish the VAPID scheme: L<https://tools.ietf.org/html/rfc8292>
+RFC8292 establish the VAPID scheme: L<https://tools.ietf.org/html/rfc8292>
 
 The following code samples and tutorials were very useful:
 
