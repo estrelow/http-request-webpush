@@ -3,3 +3,4 @@ Makefile.PL
 MANIFEST
 lib/HTTP/Request/Webpush.pm
 examples/send.pl
+t/http-request-webpush.t
